@@ -53,24 +53,7 @@ type stream struct {
 	done bool
 }
 
-// Serve will start the server
-func serve() (err error) {
-	channels := make(map[string]map[float64]chan stream)
-	archived := make(map[string]*os.File)
-	advertisements := make(map[string]bool)
-	mutex := &sync.Mutex{}
-  tplBin, err := os.ReadFile("mainpage.html.tpl")
-  if err != nil {
-    log.Debugf("Failed to open html template file: %s", err)
-    return
-  }
-  tpl := string(tplBin)
-	tplmain, err := template.New("webpage").Parse(tpl)
-	if err != nil {
-		return
-	}
-
-	handler := func(w http.ResponseWriter, r *http.Request) {
+func handler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
 		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
@@ -296,6 +279,23 @@ func serve() (err error) {
 		} else {
 			w.WriteHeader(http.StatusOK)
 		}
+	}
+
+// Serve will start the server
+func serve() (err error) {
+	channels := make(map[string]map[float64]chan stream)
+	archived := make(map[string]*os.File)
+	advertisements := make(map[string]bool)
+	mutex := &sync.Mutex{}
+  tplBin, err := os.ReadFile("mainpage.html.tpl")
+  if err != nil {
+    log.Debugf("Failed to open html template file: %s", err)
+    return
+  }
+  tpl := string(tplBin)
+	tplmain, err := template.New("webpage").Parse(tpl)
+	if err != nil {
+		return
 	}
 
 	log.Infof("running on port %d", flagPort)

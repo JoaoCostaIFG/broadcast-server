@@ -116,122 +116,57 @@ func handleArchivedPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func handler(w http.ResponseWriter, r *http.Request) {
-	var err error
+func handleGetRequest(w http.ResponseWriter, r *http.Request) {
+	id := rand.Float64()
+	mutex.Lock()
+	channels[r.URL.Path][id] = make(chan stream, 30)
+	channel := channels[r.URL.Path][id]
+	log.Debugf("added listener %f", id)
+	mutex.Unlock()
 
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Cache-Control", "no-cache, no-store")
 
-	log.Debugf("opened %s %s", r.Method, r.URL.Path)
-	defer func() {
-		log.Debugf("finished %s\n", r.URL.Path)
-	}()
-
-	if r.URL.Path == "/" {
-		handleMainPage(w, r)
-		return
-	} else if r.URL.Path == "/favicon.ico" {
-		w.WriteHeader(http.StatusOK)
-		return
-	} else if strings.HasPrefix(r.URL.Path, "/"+flagFolder+"/") {
-		handleArchivedPage(w, r)
-		return
-	}
-
-	v, ok := r.URL.Query()["stream"]
-	doStream := ok && v[0] == "true"
-
-	v, ok = r.URL.Query()["archive"]
-	doArchive := ok && v[0] == "true"
-
-	if doArchive && r.Method == "POST" {
-		if _, ok := archived[r.URL.Path]; !ok {
-			folderName := path.Join(flagFolder, time.Now().Format("200601021504"))
-			os.MkdirAll(folderName, os.ModePerm)
-			archived[r.URL.Path], err = os.Create(path.Join(folderName, strings.TrimPrefix(r.URL.Path, "/")))
-			if err != nil {
-				log.Error(err)
+	mimetyped := false
+	canceled := false
+	for {
+		select {
+		case s := <-channel:
+			if s.done {
+				canceled = true
+			} else {
+				if !mimetyped {
+					mimetyped = true
+					mimetype := mimetype.Detect(s.b).String()
+					if mimetype == "application/octet-stream" {
+						ext := strings.TrimPrefix(filepath.Ext(r.URL.Path), ".")
+						log.Debug("checking extension %s", ext)
+						mimetype = filetype.GetType(ext).MIME.Value
+					}
+					w.Header().Set("Content-Type", mimetype)
+					log.Debugf("serving as Content-Type: '%s'", mimetype)
+				}
+				w.Write(s.b)
+				w.(http.Flusher).Flush()
 			}
+		case <-r.Context().Done():
+			log.Debug("consumer canceled")
+			canceled = true
 		}
-		defer func() {
-			mutex.Lock()
-			if _, ok := archived[r.URL.Path]; ok {
-				log.Debugf("closed archive for %s", r.URL.Path)
-				archived[r.URL.Path].Close()
-				delete(archived, r.URL.Path)
-			}
-			mutex.Unlock()
-		}()
-	}
-
-	v, ok = r.URL.Query()["advertise"]
-	if ok && v[0] == "true" && doStream {
-		mutex.Lock()
-		advertisements[r.URL.Path] = true
-		mutex.Unlock()
-		defer func() {
-			mutex.Lock()
-			delete(advertisements, r.URL.Path)
-			mutex.Unlock()
-		}()
+		if canceled {
+			break
+		}
 	}
 
 	mutex.Lock()
-	if _, ok := channels[r.URL.Path]; !ok {
-		channels[r.URL.Path] = make(map[float64]chan stream)
-	}
+	delete(channels[r.URL.Path], id)
+	log.Debugf("removed listener %f", id)
 	mutex.Unlock()
+	close(channel)
+}
 
-	if r.Method == "GET" {
-		id := rand.Float64()
-		mutex.Lock()
-		channels[r.URL.Path][id] = make(chan stream, 30)
-		channel := channels[r.URL.Path][id]
-		log.Debugf("added listener %f", id)
-		mutex.Unlock()
-
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Pragma", "no-cache")
-		w.Header().Set("Cache-Control", "no-cache, no-store")
-
-		mimetyped := false
-		canceled := false
-		for {
-			select {
-			case s := <-channel:
-				if s.done {
-					canceled = true
-				} else {
-					if !mimetyped {
-						mimetyped = true
-						mimetype := mimetype.Detect(s.b).String()
-						if mimetype == "application/octet-stream" {
-							ext := strings.TrimPrefix(filepath.Ext(r.URL.Path), ".")
-							log.Debug("checking extension %s", ext)
-							mimetype = filetype.GetType(ext).MIME.Value
-						}
-						w.Header().Set("Content-Type", mimetype)
-						log.Debugf("serving as Content-Type: '%s'", mimetype)
-					}
-					w.Write(s.b)
-					w.(http.Flusher).Flush()
-				}
-			case <-r.Context().Done():
-				log.Debug("consumer canceled")
-				canceled = true
-			}
-			if canceled {
-				break
-			}
-		}
-
-		mutex.Lock()
-		delete(channels[r.URL.Path], id)
-		log.Debugf("removed listener %f", id)
-		mutex.Unlock()
-		close(channel)
-	} else if r.Method == "POST" {
+func handlePostRequest(w http.ResponseWriter, r *http.Request, doStream bool, doArchive bool) {
 		buffer := make([]byte, 2048)
 		cancel := true
 		isdone := false
@@ -289,6 +224,81 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				c <- stream{done: true}
 			}
 		}
+}
+
+func handler(w http.ResponseWriter, r *http.Request) {
+	var err error
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+
+	log.Debugf("opened %s %s", r.Method, r.URL.Path)
+	defer func() {
+		log.Debugf("finished %s\n", r.URL.Path)
+	}()
+
+	if r.URL.Path == "/" {
+		handleMainPage(w, r)
+		return
+	} else if r.URL.Path == "/favicon.ico" {
+		w.WriteHeader(http.StatusOK)
+		return
+	} else if strings.HasPrefix(r.URL.Path, "/"+flagFolder+"/") {
+		handleArchivedPage(w, r)
+		return
+	}
+
+	v, ok := r.URL.Query()["stream"]
+	doStream := ok && v[0] == "true"
+
+	v, ok = r.URL.Query()["archive"]
+	doArchive := ok && v[0] == "true"
+
+	v, ok = r.URL.Query()["advertise"]
+	doAdvertise := ok && v[0] == "true"
+
+	if doArchive && r.Method == "POST" {
+		if _, ok := archived[r.URL.Path]; !ok {
+			folderName := path.Join(flagFolder, time.Now().Format("200601021504"))
+			os.MkdirAll(folderName, os.ModePerm)
+			archived[r.URL.Path], err = os.Create(path.Join(folderName, strings.TrimPrefix(r.URL.Path, "/")))
+			if err != nil {
+				log.Error(err)
+			}
+		}
+		defer func() {
+			mutex.Lock()
+			if _, ok := archived[r.URL.Path]; ok {
+				log.Debugf("closed archive for %s", r.URL.Path)
+				archived[r.URL.Path].Close()
+				delete(archived, r.URL.Path)
+			}
+			mutex.Unlock()
+		}()
+	}
+
+	if doAdvertise && doStream {
+		mutex.Lock()
+		advertisements[r.URL.Path] = true
+		mutex.Unlock()
+		defer func() {
+			mutex.Lock()
+			delete(advertisements, r.URL.Path)
+			mutex.Unlock()
+		}()
+	}
+
+	mutex.Lock()
+	if _, ok := channels[r.URL.Path]; !ok {
+		channels[r.URL.Path] = make(map[float64]chan stream)
+	}
+	mutex.Unlock()
+
+	if r.Method == "GET" {
+    handleGetRequest(w, r)
+	} else if r.Method == "POST" {
+    handlePostRequest(w, r, doStream, doArchive)
 	} else {
 		w.WriteHeader(http.StatusOK)
 	}

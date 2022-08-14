@@ -121,7 +121,7 @@ func handleGetRequest(w http.ResponseWriter, r *http.Request) {
 	mutex.Lock()
 	channels[r.URL.Path][id] = make(chan stream, 30)
 	channel := channels[r.URL.Path][id]
-	log.Debugf("added listener %f", id)
+  log.Debugf("Dbg: added listener: [listener=%f]", id)
 	mutex.Unlock()
 
 	w.Header().Set("Connection", "keep-alive")
@@ -141,17 +141,17 @@ func handleGetRequest(w http.ResponseWriter, r *http.Request) {
 					mimetype := mimetype.Detect(s.b).String()
 					if mimetype == "application/octet-stream" {
 						ext := strings.TrimPrefix(filepath.Ext(r.URL.Path), ".")
-						log.Debug("checking extension %s", ext)
+            log.Debug("Dbg: checking extension: [ext=%s]", ext)
 						mimetype = filetype.GetType(ext).MIME.Value
 					}
 					w.Header().Set("Content-Type", mimetype)
-					log.Debugf("serving as Content-Type: '%s'", mimetype)
+          log.Debugf("Dbg: serving as Content-Type: [mime=%s]", mimetype)
 				}
 				w.Write(s.b)
 				w.(http.Flusher).Flush()
 			}
 		case <-r.Context().Done():
-			log.Debug("consumer canceled")
+      log.Debug("Dbg: consumer canceled")
 			canceled = true
 		}
 		if canceled {
@@ -161,7 +161,7 @@ func handleGetRequest(w http.ResponseWriter, r *http.Request) {
 
 	mutex.Lock()
 	delete(channels[r.URL.Path], id)
-	log.Debugf("removed listener %f", id)
+  log.Debugf("Dbg: removed listener: [listener=%f]", id)
 	mutex.Unlock()
 	close(channel)
 }
@@ -179,7 +179,7 @@ func handlePostRequest(w http.ResponseWriter, r *http.Request, doStream bool, do
 			default:
 			}
 			if isdone {
-				log.Debug("is done")
+        log.Debug("Dbg: is done")
 				break
 			}
 			mutex.Lock()
@@ -196,7 +196,7 @@ func handlePostRequest(w http.ResponseWriter, r *http.Request, doStream bool, do
 		}
 		n, err := r.Body.Read(buffer)
 		if err != nil {
-			log.Errorf("err: %s", err)
+      log.Errorf("Err: Failed to read request body: [err=%s]", err)
 			if err == io.ErrUnexpectedEOF {
 				cancel = false
 			}
@@ -233,9 +233,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
 	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
 
-	log.Debugf("opened %s %s", r.Method, r.URL.Path)
+  log.Debugf("Dbg: received request: [method=%s], [path=%s]", r.Method, r.URL.Path)
 	defer func() {
-		log.Debugf("finished %s\n", r.URL.Path)
+    log.Debugf("Dbg: finished handling request: [path=%s]", r.URL.Path)
 	}()
 
 	if r.URL.Path == "/" {
@@ -264,13 +264,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			os.MkdirAll(folderName, os.ModePerm)
 			archived[r.URL.Path], err = os.Create(path.Join(folderName, strings.TrimPrefix(r.URL.Path, "/")))
 			if err != nil {
-				log.Error(err)
+        log.Errorf("Err: failed creating archive directory: [err=%s]", err)
 			}
 		}
 		defer func() {
 			mutex.Lock()
 			if _, ok := archived[r.URL.Path]; ok {
-				log.Debugf("closed archive for %s", r.URL.Path)
+        log.Debugf("Dbg: closed archive: [path=%s]", r.URL.Path)
 				archived[r.URL.Path].Close()
 				delete(archived, r.URL.Path)
 			}
@@ -312,7 +312,7 @@ func serve() (err error) {
 	mutex = &sync.Mutex{}
 	tplBin, err := os.ReadFile("mainpage.html.tpl")
 	if err != nil {
-		log.Errorf("Failed to open html template file: %s", err)
+    log.Errorf("Err: failed to open html template file: [path=%s]", err)
 		return
 	}
 	tpl := string(tplBin)
@@ -321,10 +321,10 @@ func serve() (err error) {
 		return
 	}
 
-	log.Infof("running on port %d", flagPort)
+  log.Infof("Info: running: [port=%d]", flagPort)
 	err = http.ListenAndServe(fmt.Sprintf(":%d", flagPort), http.HandlerFunc(handler))
 	if err != nil {
-		log.Error(err)
+    log.Error("Err: serve failed: [err=%s]", err)
 	}
 	return
 }

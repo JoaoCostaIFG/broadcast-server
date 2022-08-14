@@ -167,63 +167,63 @@ func handleGetRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePostRequest(w http.ResponseWriter, r *http.Request, doStream bool, doArchive bool) {
-		buffer := make([]byte, 2048)
-		cancel := true
-		isdone := false
-		lifetime := 0
-		for {
-			if !doStream {
-				select {
-				case <-r.Context().Done():
-					isdone = true
-				default:
-				}
-				if isdone {
-					log.Debug("is done")
-					break
-				}
-				mutex.Lock()
-				numListeners := len(channels[r.URL.Path])
-				mutex.Unlock()
-				if numListeners == 0 {
-					time.Sleep(1 * time.Second)
-					lifetime++
-					if lifetime > 600 {
-						isdone = true
-					}
-					continue
-				}
+	buffer := make([]byte, 2048)
+	cancel := true
+	isdone := false
+	lifetime := 0
+	for {
+		if !doStream {
+			select {
+			case <-r.Context().Done():
+				isdone = true
+			default:
 			}
-			n, err := r.Body.Read(buffer)
-			if err != nil {
-				log.Errorf("err: %s", err)
-				if err == io.ErrUnexpectedEOF {
-					cancel = false
-				}
+			if isdone {
+				log.Debug("is done")
 				break
 			}
-			if doArchive {
-				mutex.Lock()
-				archived[r.URL.Path].Write(buffer[:n])
-				mutex.Unlock()
-			}
 			mutex.Lock()
-			channels_current := channels[r.URL.Path]
+			numListeners := len(channels[r.URL.Path])
 			mutex.Unlock()
-			for _, c := range channels_current {
-				var b2 = make([]byte, n)
-				copy(b2, buffer[:n])
-				c <- stream{b: b2}
+			if numListeners == 0 {
+				time.Sleep(1 * time.Second)
+				lifetime++
+				if lifetime > 600 {
+					isdone = true
+				}
+				continue
 			}
 		}
-		if cancel {
-			mutex.Lock()
-			channels_current := channels[r.URL.Path]
-			mutex.Unlock()
-			for _, c := range channels_current {
-				c <- stream{done: true}
+		n, err := r.Body.Read(buffer)
+		if err != nil {
+			log.Errorf("err: %s", err)
+			if err == io.ErrUnexpectedEOF {
+				cancel = false
 			}
+			break
 		}
+		if doArchive {
+			mutex.Lock()
+			archived[r.URL.Path].Write(buffer[:n])
+			mutex.Unlock()
+		}
+		mutex.Lock()
+		channels_current := channels[r.URL.Path]
+		mutex.Unlock()
+		for _, c := range channels_current {
+			var b2 = make([]byte, n)
+			copy(b2, buffer[:n])
+			c <- stream{b: b2}
+		}
+	}
+	if cancel {
+		mutex.Lock()
+		channels_current := channels[r.URL.Path]
+		mutex.Unlock()
+		for _, c := range channels_current {
+			c <- stream{done: true}
+		}
+	}
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -296,9 +296,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	mutex.Unlock()
 
 	if r.Method == "GET" {
-    handleGetRequest(w, r)
+		handleGetRequest(w, r)
 	} else if r.Method == "POST" {
-    handlePostRequest(w, r, doStream, doArchive)
+		handlePostRequest(w, r, doStream, doArchive)
 	} else {
 		w.WriteHeader(http.StatusOK)
 	}
